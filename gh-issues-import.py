@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
-import urllib.request, urllib.error, urllib.parse
+import requests
 import json
-import base64
 import sys, os
 import datetime
 import argparse, configparser
@@ -45,11 +44,10 @@ def init_config():
 	config_group = arg_parser.add_mutually_exclusive_group(required=False)
 	config_group.add_argument('--config', help="The location of the config file (either absolute, or relative to the current working directory). Defaults to `config.ini` found in the same folder as this script.")
 	config_group.add_argument('--no-config', dest='no_config',  action='store_true', help="No config file will be used, and the default `config.ini` will be ignored. Instead, all settings are either passed as arguments, or (where possible) requested from the user as a prompt.")
-	
-	arg_parser.add_argument('-u', '--username', help="The username of the account that will create the new issues. The username will not be stored anywhere if passed in as an argument.")
-	arg_parser.add_argument('-p', '--password', help="The password (in plaintext) of the account that will create the new issues. The password will not be stored anywhere if passed in as an argument.")
 	arg_parser.add_argument('-s', '--source', help="The source repository which the issues should be copied from. Should be in the format `user/repository`.")
 	arg_parser.add_argument('-t', '--target', help="The destination repository which the issues should be copied to. Should be in the format `user/repository`.")
+
+	arg_parser.add_argument('--token', help="The personal access token of the account that will create the new issues.")
 	
 	arg_parser.add_argument('--ignore-comments',  dest='ignore_comments',  action='store_true', help="Do not import comments in the issue.")		
 	arg_parser.add_argument('--ignore-milestone', dest='ignore_milestone', action='store_true', help="Do not import the milestone attached to the issue.")
@@ -91,9 +89,7 @@ def init_config():
 			print("Default config file not found in '%s'" % config_file_name)
 			print("You may be prompted for some missing settings.")
 
-	
-	if args.username: config.set('login', 'username', args.username)
-	if args.password: config.set('login', 'password', args.password)
+	if args.token: config.set('login', 'token', args.token)
 	
 	if args.source: config.set('source', 'repository', args.source)
 	if args.target: config.set('target', 'repository', args.target)
@@ -136,23 +132,14 @@ def init_config():
 	
 	# Prompt for username/password if none is provided in either the config or an argument
 	def get_credentials_for(which):
-		if not config.has_option(which, 'username'):
-			if config.has_option('login', 'username'):
-				config.set(which, 'username', config.get('login', 'username'))
+		if not config.has_option(which, 'token'):
+			if config.has_option('login', 'token'):
+				config.set(which, 'token', config.get('login', 'token'))
 			elif ( (which == 'target') and query.yes_no("Do you wish to use the same credentials for the target repository?") ):
-				config.set('target', 'username', config.get('source', 'username'))
+				config.set('target', 'token', config.get('source', 'token'))
 			else:
-				query_str = "Enter your username for '%s' at '%s': " % (config.get(which, 'repository'), config.get(which, 'server'))
-				config.set(which, 'username', query.username(query_str))
-		
-		if not config.has_option(which, 'password'):
-			if config.has_option('login', 'password'):
-				config.set(which, 'password', config.get('login', 'password'))
-			elif ( (which == 'target') and config.get('source', 'username') == config.get('target', 'username') and config.get('source', 'server') == config.get('target', 'server') ):
-				config.set('target', 'password', config.get('source', 'password'))
-			else:
-				query_str = "Enter your password for '%s' at '%s': " % (config.get(which, 'repository'), config.get(which, 'server'))
-				config.set(which, 'password', query.password(query_str))
+				query_str = "Enter your personal access token for  '%s' at '%s': " % (config.get(which, 'repository'), config.get(which, 'server'))
+				config.set(which, 'token', query.username(query_str))
 	
 	get_credentials_for('source')
 	get_credentials_for('target')
@@ -193,33 +180,28 @@ def send_request(which, url, post_data=None):
 		post_data = json.dumps(post_data).encode("utf-8")
 	
 	full_url = "%s/%s" % (config.get(which, 'url'), url)
-	req = urllib.request.Request(full_url, post_data)
-	
-	username = config.get(which, 'username')
-	password = config.get(which, 'password')
-	req.add_header("Authorization", b"Basic " + base64.urlsafe_b64encode(username.encode("utf-8") + b":" + password.encode("utf-8")))
-	
-	req.add_header("Content-Type", "application/json")
-	req.add_header("Accept", "application/json")
-	req.add_header("User-Agent", "IQAndreas/github-issues-import")
-	
-	try:
-		response = urllib.request.urlopen(req)
-		json_data = response.read()
-	except urllib.error.HTTPError as error:
-		
-		error_details = error.read();
-		error_details = json.loads(error_details.decode("utf-8"))
-		
-		if error.code in http_error_messages:
-			sys.exit(http_error_messages[error.code])
+
+	session = requests.Session()
+	session.headers["Content-Type"] = "application/json"
+	session.headers['Authorization'] = f"token {config.get(which, 'token')}"
+
+	if not post_data:
+		response = session.get(full_url, data=post_data)
+	else:
+		response = session.post(full_url, data=post_data)
+
+	json_data = response.json()
+	if response.status_code < 200 and response.status_code > 299:
+		if response.status_code in http_error_messages:
+			sys.exit(http_error_messages[response.status_code])
 		else:
-			error_message = "ERROR: There was a problem importing the issues.\n%s %s" % (error.code, error.reason)
-			if 'message' in error_details:
-				error_message += "\nDETAILS: " + error_details['message']
+			error_message = "ERROR: There was a problem importing the issues.\n%s %s" % (response.status_code, response.reason)
+			if 'message' in json_data:
+				error_message += "\nDETAILS: " + json_data['message']
+
 			sys.exit(error_message)
-	
-	return json.loads(json_data.decode("utf-8"))
+
+	return json_data
 
 def get_milestones(which):
 	return send_request(which, "milestones?state=open")
@@ -421,11 +403,11 @@ if __name__ == '__main__':
 	
 	state.current = state.LOADING_CONFIG
 	
-	issue_ids = init_config()	
+	issue_ids = init_config()
 	issues = []
 	
 	state.current = state.FETCHING_ISSUES
-	
+
 	# Argparser will prevent us from getting both issue ids and specifying issue state, so no duplicates will be added
 	if (len(issue_ids) > 0):
 		issues += get_issues_by_id('source', issue_ids)
