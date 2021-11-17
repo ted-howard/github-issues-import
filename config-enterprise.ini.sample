@@ -4,14 +4,12 @@
 [source]
 server = github.com
 repository = OctoCat/Hello-World
-username = octocat@github.com
-password = plaintext_pa$$w0rd
+token = <<personal access token>>
 
 [target]
 server = octodog.org
 repository = OctoDog/Hello-World
-username = admin@octodog.org
-password = plaintext_pass\/\/ord
+token = <<personal access token>>
 
 [format] # These can be adjusted based on your group's region and language.
 
