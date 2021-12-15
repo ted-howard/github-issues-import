@@ -191,7 +191,7 @@ def send_request(which, url, post_data=None):
 		response = session.post(full_url, data=post_data)
 
 	json_data = response.json()
-	if response.status_code < 200 and response.status_code > 299:
+	if response.status_code < 200 or response.status_code > 299:
 		if response.status_code in http_error_messages:
 			sys.exit(http_error_messages[response.status_code])
 		else:
@@ -243,10 +243,10 @@ def import_milestone(source):
 		"title": source['title'],
 		"state": "open",
 		"description": source['description'],
-		"due_on": source['due_on']
+		"due_on": source['due_on'] if source['due_on'] else ''
 	}
 	
-	result_milestone = send_request('target', "milestones", source)
+	result_milestone = send_request('target', "milestones", data)
 	print("Successfully created milestone '%s'" % result_milestone['title'])
 	return result_milestone
 
