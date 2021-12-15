@@ -243,8 +243,9 @@ def import_milestone(source):
 		"title": source['title'],
 		"state": "open",
 		"description": source['description'],
-		"due_on": source['due_on'] if source['due_on'] else ''
 	}
+	if source['due_on']:
+		data['due_on'] = source['due_on']
 	
 	result_milestone = send_request('target', "milestones", data)
 	print("Successfully created milestone '%s'" % result_milestone['title'])
